@@ -1,0 +1,317 @@
+---
+title: "Breast Classification Cancer Project - Simplistic Implementation"
+author: "Mayank Dhami"
+date: "30/08/2020"
+output:
+   html_document:
+     toc: yes
+     theme: cosmo
+     highlight: tango
+     code_folding: hide
+     fig_width: 12
+     fig_height: 8
+---
+
+## 1. Intro 
+Hi, Kagglers!
+
+This is my first project on Kaggle to learn data science.
+
+This attempt might not be perfect, but certainly something to learn from.
+
+Suggestions are welcomed for better techniques.
+
+In short, I used few of the most well known algorithms to solve the purpose in this kernel.
+I hope data science beginners could learn a thing or few from this.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+```
+
+---
+
+## 2. Data Importing and cleaning
+### 2.1 Import dataset
+cancer refers to the wbcd dataset in focus. 
+```{r}
+cancer = read.csv("data/data.csv", stringsAsFactors = F)
+str(cancer)
+```
+The last column 'X' does not have any meaningful values so it should be dropped.
+
+### 2.2 Remove the last null column as identified earlier
+```{r}
+cancer = cancer[,-33]
+```
+
+### 2.3 Declare the target variable as categorical (factor).
+```{r}
+cancer$diagnosis = factor(cancer$diagnosis, levels = c("B", "M"), labels = c("Benign", "Malignant"))
+```
+
+### 2.4 Data format and summary of dataset {.tabset}
+#### Data format
+```{r}
+str(cancer)
+```
+
+#### Summary
+```{r}
+summary(cancer)
+```
+
+#### Sample
+```{r}
+knitr::kable(head(cancer))
+```
+
+As you can see, there are a lot of variables with very different range of values. Due to this, the impact of the larger valued variables will be more than the smaller ones. This could potentially cause problems in algorithms which calculate distance between instances like knn. So, there is a need to normalize the variable values.
+
+### 2.5 Normalize data
+```{r}
+normalize = function(x){
+  return((x-min(x))/(max(x)-min(x)))
+}
+cancer_n = as.data.frame(lapply(cancer[3:32], normalize))
+cancer_n = cbind(cancer[,c(1,2)],cancer_n)
+knitr::kable(head(cancer_n))
+```
+
+---
+
+## 3. Analyzing correlation between variables
+### 3.1 Correlation among variables {.tabset}
+However there are multiple packages to represent correlation, in this section I will use a standard version for all the variables (mean, se, worst).
+
+#### Mean
+```{r}
+library(PerformanceAnalytics)
+chart.Correlation(cancer_n[,c(3:12)],histogram=TRUE, col="grey10", pch=1, main="Cancer Mean")
+```
+
+#### Standard Error
+```{r}
+chart.Correlation(cancer_n[,c(13:22)],histogram=TRUE, col="grey10", pch=1, main="Cancer SE")
+```
+
+#### Worst
+```{r}
+chart.Correlation(cancer_n[,c(23:32)],histogram=TRUE, col="grey10", pch=1, main="Cancer Worst")
+```
+
+### 3.2 Using ggcorr for simplified plot {.tabset}
+With color coding, it is easier to make out difference between correlation values.
+
+#### Mean
+```{r}
+library(GGally)
+ggcorr(cancer_n[,c(3:12)], name = "corr", label = TRUE, size = 3, angle = 10)+
+  theme(legend.position="none")+
+labs(title="Cancer Mean")+
+theme(plot.title=element_text(face='bold',color='black',hjust=0.5,size=12))
+```
+
+#### Standard Error
+```{r}
+ggcorr(cancer_n[,c(13:22)], name = "corr", label = TRUE, size = 3, angle = 10)+
+  theme(legend.position="none")+
+labs(title="Cancer SE")+
+theme(plot.title=element_text(face='bold',color='black',hjust=0.5,size=12))
+```
+
+#### Worst
+```{r}
+ggcorr(cancer_n[,c(23:32)], name = "corr", label = TRUE, size = 3, angle = 10)+
+  theme(legend.position="none")+
+labs(title="Cancer Worst")+
+theme(plot.title=element_text(face='bold',color='black',hjust=0.5,size=12))
+```
+
+
+---
+
+
+## 4. Apply machine learning algorithms and compare them
+### 4.1 Division of training and testing data
+Randomly selecting 70% of the data for training and 30% for testing.
+```{r}
+set.seed(123)
+library(dplyr)
+library(caret)
+cancer.survival <- cancer_n$diagnosis %>% 
+  createDataPartition(p = 0.70, list = FALSE)
+cancer_train = cancer_n[cancer.survival,]
+cancer_test = cancer_n[-cancer.survival,]
+```
+
+### 4.2 Sanity check proportion of benign and malignant cases in both datasets {.tabset}
+#### train 
+```{r}
+prop.table(table(cancer_train$diagnosis))
+```
+
+#### test
+```{r}
+prop.table(table(cancer_test$diagnosis))
+```
+They look pretty much very similar, so we are good to go.
+
+### 4.3 Apply the most commonly used, high interpretability ML algorithms {.tabset}
+#### CART (rpart) 
+```{r}
+library(rpart)
+cart = rpart(diagnosis~.,data=cancer_train[,-1], method = "class")
+cart_pred = predict(cart, cancer_test[,c(-1,-2)], type="class")
+cart_CM  = confusionMatrix(cart_pred, cancer_test$diagnosis)	
+cart_CM
+```
+
+
+#### CART prune (rpart) 
+```{r}
+library(rpart)
+cart_prun = prune(cart, cp=cart$cptable[which.min(cart$cptable[,"xerror"]),"CP"])
+cart_pred_prun = predict(cart_prun, cancer_test[,c(-1,-2)], type="class")
+cart_CM_pru = confusionMatrix(cart_pred_prun, cancer_test$diagnosis)			
+cart_CM_pru
+```
+
+
+#### C5.0
+```{r}
+library(C50)
+c50 <- C5.0(cancer_train[,c(-1,-2)],cancer_train$diagnosis, trials =15)
+c50_pred = predict(c50, cancer_test[,c(-1,-2)])
+c50_CM = confusionMatrix(c50_pred, cancer_test$diagnosis)
+c50_CM
+```
+
+
+#### Random Forest
+```{r}
+library(randomForest)
+rf = randomForest(diagnosis~.,cancer_train[,-1],importance = T)
+rf_pred = predict(rf, cancer_test[,c(-1,-2)])
+rf_CM = confusionMatrix(rf_pred,cancer_test$diagnosis)
+rf_CM
+```
+
+```{r}
+plot(rf, main="Random Forest (Error Rate vs. Number of Trees)")
+```
+
+##### Variance Importance Plot
+```{r}
+varImpPlot(rf)
+```
+
+
+#### SVM
+```{r}
+library(e1071)
+svmodel = svm(diagnosis~.,cancer_train[,-1], cost = 10)
+svmpred = predict(svmodel,cancer_test[,c(-1,-2)])
+svm_CM = confusionMatrix(svmpred,cancer_test$diagnosis)
+svm_CM
+```
+
+#### SVM Tuned
+##### Choosing the gamma and cost parameters in SVM wich give best performance
+```{r}
+library(e1071)
+gamma = seq(0,0.1,0.005)
+cost = 2^(0:5)
+param = expand.grid(cost=cost, gamma=gamma)    
+
+acc = numeric()
+acc1 = NULL; acc2 = NULL
+
+for(i in 1:NROW(param)){        
+        svmodel2 = svm(diagnosis~., cancer_train[,-1], gamma=param$gamma[i], cost=param$cost[i])
+        svm_pred2 = predict(svmodel2, cancer_test[,c(-1,-2)])
+        acc1 = confusionMatrix(svm_pred2, cancer_test$diagnosis)
+        acc2[i] = acc1$overall[1]
+}
+
+acc_list = data.frame(p= seq(1,NROW(param)), accuracy = acc2)
+
+tune_p = subset(acc_list, accuracy==max(accuracy))[1,]
+subs = paste("Optimal cost =", param$cost[tune_p$p],"and optimal gamma =", param$gamma[tune_p$p], "(Accuracy :", round(tune_p$accuracy,4),") in SVM")
+library(ggplot2)
+ggplot(acc_list, aes(x=p,y= accuracy)) +
+geom_line()+labs(title = "Accuracy with changing gamma and cost parameter options", subtitle = subs)
+```
+
+##### Apply optimal parameters(gamma, cost) for best performance in SVM
+```{r}
+svm_tune = svm(diagnosis~., cancer_train[,-1], cost=param$cost[tune_p$p], gamma=param$gamma[tune_p$p])
+svm_tunepred = predict(svm_tune, cancer_test[,c(-1,-2)])
+svm_CMtune = confusionMatrix(svm_tunepred, cancer_test$diagnosis)
+svm_CMtune
+```
+
+
+#### Ada Boost
+```{r}
+library(ada)
+adaml <- ada(diagnosis~., cancer_train[,-1], test.x = cancer_train[,c(-1,-2)], test.y = cancer_train[,2], type = "gentle", iter = 45)
+ada_pred <- predict(adaml, cancer_test[,c(-1,-2)])
+ada_CM <- confusionMatrix(ada_pred, cancer_test$diagnosis)
+ada_CM
+```
+
+
+#### knn - Best tuned
+##### k with best performance is chosen for model
+```{r}
+library(class)
+acc <- numeric() 
+for(i in 1:20){
+    knn_pred = knn(cancer_train[,c(-1,-2)], cancer_test[,c(-1,-2)], cancer_train$diagnosis, k=i)
+    acc = c(acc,mean(knn_pred==cancer_test$diagnosis))
+}
+acc = data.frame(k= seq(1,20), accuracy = acc)
+tune_k = subset(acc, accuracy==max(accuracy))[1,]
+subs = paste("Optimal number of k is", tune_k$k, "(accuracy :", round(tune_k$accuracy,4),") in KNN")
+library(ggplot2)
+ggplot(acc, aes(x=k,y= accuracy)) +
+    geom_line()+labs(title = "Accuracy with changing k", subtitle = subs)
+```
+
+
+##### Apply optimal k for best prediction performance in KNN
+```{r}
+pred_knn = knn(cancer_train[,c(-1,-2)], cancer_test[,c(-1,-2)],cancer_train$diagnosis, k=tune_k$k)
+knn_CM  = confusionMatrix(pred_knn, cancer_test$diagnosis)
+knn_CM
+```
+
+
+### 4.4 Compare the models
+```{r}
+model_cmp = data.frame(Model = c("CART","CART prune","C5.0","Random Forest","SVM","SVM Tuned", "Ada boost","knn tuned"), Accuracy = c(cart_CM$overall[1],cart_CM_pru$overall[1],c50_CM$overall[1],rf_CM$overall[1],svm_CM$overall[1],svm_CMtune$overall[1],ada_CM$overall[1],knn_CM$overall[1]))
+
+library(ggplot2)
+ggplot(model_cmp, aes(x=Model,y= Accuracy,color= Model, label= Accuracy)) +
+    geom_point()+labs(title = "Accuracy comparison of models")+ geom_text(aes(label= round(Accuracy,4)),vjust=2)
+```
+Either of Adaboost and tuned SVM can be used for preparing the final prediction dataset.
+
+## 5. Make final prediction dataset for submission
+We are going to use tuned SVM predictions for submission.
+```{r}
+library(utils)
+submit = data.frame(id = cancer_test[,1],predicted_status = svm_tunepred)
+write.csv(submit,"submission.csv")
+```
+
+
+## 6. Conclusion
+
+This was my first very simplistic version of wisconsin breast cancer dataset analysis and ML predictions. Tried to keep it as basic, yet informative. 
+
+Will come up with more detailed analysis and different algorithms next time hopefully.
+If you do find this worth a read and easily understandable, community upvotes and comments will encourage me to do better.
+
+Thanks very much again!
